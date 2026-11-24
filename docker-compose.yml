@@ -1,0 +1,42 @@
+# Admin portal stack: the BFF plus the static React app.
+#
+# The BFF must reach OpenHIM core from the main OpenHIE stack, so it joins that stack's
+# network as an *external* network. That compose file uses project `name: openhim` with
+# a network called `openhim`, so the real network name is `openhim_openhim` (NOT
+# `openhie`) — `docker network ls` confirms it.
+services:
+  backend:
+    build: ./backend
+    container_name: admin-portal-backend
+    env_file: ./backend/.env
+    volumes:
+      # The admin-portal client key from single_stack/keys (onboard-client.sh).
+      - ${ADMIN_PORTAL_KEY:-../single_stack/keys/admin-portal.key.pem}:/run/secrets/admin-portal.key.pem:ro
+    ports:
+      # Loopback only. On the VPS the edge Caddy (caddy_vps) reaches it on the admin-portal-internal network.
+      - "127.0.0.1:${ADMIN_API_PORT:-4200}:4200"
+    networks: [admin-internal, openhim]
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Baked into the browser bundle at build time — the URL the admin's browser
+        # uses to reach the BFF (host-published port, not the in-network service name).
+        VITE_API_BASE: "${VITE_API_BASE:-http://localhost:4200}"
+    container_name: admin-portal-frontend
+    depends_on: [backend]
+    ports:
+      # 8080 = openhim-core, 8090 = patient portal, so the admin portal takes 8091.
+      - "127.0.0.1:${ADMIN_PORT:-8091}:80"
+    networks: [admin-internal]
+    restart: unless-stopped
+
+networks:
+  admin-internal:
+    name: admin-portal-internal   # fixed name: caddy_vps joins it
+    driver: bridge
+  openhim:
+    external: true
+    name: openhim_openhim
